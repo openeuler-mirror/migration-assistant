@@ -12,6 +12,8 @@ import subprocess
 import sys
 import tarfile
 
+TOOL_VERSION = "1.0"
+
 _UNIXCONFDIR = os.environ.get('UNIXCONFDIR', '/etc')
 _OS_RELEASE_BASENAME = 'os-release'
 
@@ -1178,6 +1180,15 @@ class LinuxDistribution(object):
 _distro = LinuxDistribution()
 
 
+ABI_CC = "abi-compliance-checker"
+ABI_DUMPER = "abi-dumper"
+
+CMD_NAME = os.path.basename(__file__)
+ERROR_CODE = {"Ok": 0, "Error": 1, "Empty": 10, "NoDebug": 11, "NoABI": 12}
+
+ARGS = {}
+
+
 def run_cmd(cmd):
     '''
     run command in subprocess and return exit code, output, error.
@@ -1197,35 +1208,35 @@ def run_cmd(cmd):
 
 
 def parse_args():
-    args = []
+    desc = "Collect some infomation about bin file."
     parser = argparse.ArgumentParser(
-        description='Collect some infomation about bin file.')
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        default=False, help='Enable verbose output')
+        description=desc, epilog=f"example: {CMD_NAME} -bin /usr/bin/openssh")
+    parser.add_argument('-v', action='version',
+                        version='Package ABI Info Collector '+TOOL_VERSION)
     parser.add_argument(
-        '--bin', metavar='binfile', help='bin files', required=True)
-    args = parser.parse_args()
-
-    if args.verbose:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    if not os.access(f'{args.bin}', os.F_OK):
-        logging.error(
-            f"The input bin file {args.bin} doesn't exist. Please check")
-        exit()
-    if not os.access(f'{args.bin}', os.R_OK):
-        logging.error(f"The input bin file {args.bin} can't be read")
-        exit()
-    return args.bin
+        '-debug', help='enable debug messages', action='store_true')
+    parser.add_argument('-bin', metavar='BINFILE',
+                        help='collect binary abi info',)
+    parser.add_argument(
+        '-debuginfo', help=argparse.SUPPRESS, action='store_true')
+    parser.add_argument(
+        '-export-dir', help='specify a directory to save and reuse ABI info export (default: ./abi-info-export)', metavar='DIR')
+    #parser.add_argument('-src', help='collect source abi info', action='store_true')
+    return parser.parse_args()
 
 
-def collect_os_info(prefix_path):
-    shutil.copy('/etc/os-release', f'{prefix_path}/os-release.info')
+def collect_os_info(export_dir):
+    shutil.copy('/etc/os-release', f'{export_dir}/OLD-os-release.info')
 
 
-def collect_readelf_info(binfile, prefix_path):
+def collect_name_info(name, export_dir):
+
+    outfile = f'{export_dir}/OLD-name.info'
+    with open(f'{outfile}', 'wb+') as f:
+        f.write(name.encode())
+
+
+def collect_readelf_info(binfile, export_dir):
 
     print('Checking information about ELF ...')
     # eu-readelf is better than readelf
@@ -1233,44 +1244,36 @@ def collect_readelf_info(binfile, prefix_path):
     returncode, stdout, stderr = run_cmd(cmd)
 
     if returncode != 0:
-        logging.error(f"return code: {returncode}, {stderr.decode()}")
-        exit()
+        exit_status('Error', f'read {binfile} elf info failed')
 
-    if not os.path.exists(f"{prefix_path}"):
-        os.makedirs(f"{prefix_path}")
-    outfile = outfile = f'{prefix_path}/elf.info'
-
+    outfile = f'{export_dir}/OLD-elf.info'
     with open(f'{outfile}', 'wb+') as f:
         f.write(stdout)
 
     return outfile
 
 
-def collect_ldd_info(binfile, prefix_path):
+def collect_ldd_info(binfile, export_dir):
 
     print('Checking shared object dependencies ...')
     cmd = "ldd -v " + binfile
     returncode, stdout, stderr = run_cmd(cmd)
 
     if returncode != 0:
-        logging.error(f"return code: {returncode.decode()}, {stderr.decode()}")
-        exit()
+        exit_status('Error', f'read {binfile} ldd info failed')
 
-    if not os.path.exists(f"{prefix_path}"):
-        os.makedirs(f"{prefix_path}")
-    outfile = outfile = f'{prefix_path}/ldd.info'
-
+    outfile = f'{export_dir}/OLD-ldd.info'
     with open(f'{outfile}', 'wb+') as f:
         f.write(stdout)
 
     return outfile
 
 
-def find_soname_file(f_elf, f_ldd):
+def find_soname_file(f_elf, f_ldd, export_dir):
     print('Checking package dependencies ...')
     sym_set = set()
+    func_sym_set = set()
     with open(f'{f_elf}', 'rt') as f:
-
         elf_symbol_fmt = ' *(?P<num>[0-9]*): (?P<value>[0-9abcdef]*) (?P<size>[0-9]*).*(FUNC).*@.*'
         for line in f:
             m = re.match(elf_symbol_fmt, line)
@@ -1278,7 +1281,15 @@ def find_soname_file(f_elf, f_ldd):
                 continue
             elf_line_list = re.split(r'\s+', line.strip())
             sym = elf_line_list[7].split('@')
+            func_sym_set.add(sym[0])
             sym_set.add(sym[1])
+    if ARGS.debug:
+        print(f"All elf syms is {func_sym_set}")
+
+    file = f"{export_dir}/OLD-func-syms.info"
+    with open(f'{file}', 'wb+') as f:
+        for line in func_sym_set:
+            f.write((line+'\n').encode())
 
     soname_file_set = set()
     with open(f'{f_ldd}', 'rt') as f:
@@ -1294,7 +1305,7 @@ def find_soname_file(f_elf, f_ldd):
     return soname_file_set
 
 
-def find_so_rpm_pkgs_name(soname_file_set, binfile, prefix_path):
+def find_so_rpm_pkgs_name(soname_file_set, export_dir):
     so_pkgs_name_set = set()
 
     for file in soname_file_set:
@@ -1305,66 +1316,234 @@ def find_so_rpm_pkgs_name(soname_file_set, binfile, prefix_path):
             continue
         so_pkgs_name_set.add(stdout)
 
-    outfile = f'{prefix_path}/pkgs.info'
+    outfile = f'{export_dir}/OLD-pkgs.info'
     with open(f'{outfile}', 'wb+') as f:
         for rpm_name in so_pkgs_name_set:
             f.write(rpm_name)
 
 
-def find_soname_package(soname_file_set, binfile, prefix_path):
+def find_soname_package(soname_file_set, export_dir):
     os_distro = _distro.linux_distribution(full_distribution_name=False)[0]
     if os_distro == 'debain':
         pass
     if os_distro == 'centos' or os_distro == 'fedora':
-        soname_pkgs_set = find_so_rpm_pkgs_name(
-            soname_file_set, binfile, prefix_path)
+        find_so_rpm_pkgs_name(soname_file_set, export_dir)
 
 
-def compress_outfile(binfile, prefix_path):
+def compress_outfile(binfile, export_dir):
 
-    tar_name = prefix_path.split('/')[-1]
-    tar_file = f'{tar_name}.tar.gz'
+    tar_file = f'{export_dir}/OLD-abi-info.tar.gz'
     with tarfile.open(tar_file, "w:gz") as tar:
-        for parent, dirnames, filenames in os.walk(f'{prefix_path}'):
-            filenames[:] = [f for f in filenames if f.endswith(".info")]
+        for parent, dirnames, filenames in os.walk(f'{export_dir}'):
+            filenames[:] = [f for f in filenames if f.endswith(
+                (".info", '.xml', '.dump'))]
             for filename in filenames:
                 pathfile = os.path.join(parent, filename)
                 # 去除 tarball 中的父目录
                 tar.add(pathfile, arcname=filename)
                 os.remove(pathfile)
-    os.removedirs(prefix_path)
     tar_path = os.path.realpath(tar_file)
     print(f'{binfile} information: {tar_path}')
 
 
+def s_exit(code):
+    sys.exit(ERROR_CODE[code])
+
+
+def print_err(msg):
+    sys.stderr.write(msg+"\n")
+
+
+def exit_status(code, msg):
+    if code != "Ok":
+        print_err("ERROR: "+msg)
+    else:
+        print(msg)
+
+    s_exit(code)
+
+
+def check_cmd(prog):
+    for path in os.environ['PATH'].split(os.pathsep):
+        path = path.strip('"')
+        candidate = path+"/"+prog
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def get_rpmname_without_libs(x):
+    # 正则获取rpmname
+    return re.sub('-libs$', '', x).strip()
+
+
+def find_devel_lib_package(target_path):
+    print('Checking the dependency ...')
+    file = f'{target_path}/OLD-pkgs.info'
+    if not os.access(f'{file}', os.R_OK):
+        exit_status(
+            "Error", f"The info file {file} can't be read. Please check")
+
+    dev_pkgs_set = set()
+    libs_pkgs_set = set()
+    dbginfo_pkgs_set = set()
+    with open(file, 'r') as f:
+        for line in f:
+            rpm_name = get_rpmname_without_libs(line)
+            dev_pkgs_set.add(f'{rpm_name}-devel')
+            dbginfo_pkgs_set.add(f'{rpm_name}-debuginfo')
+            # 包名中包含 lib 关键字的包，本身就是 lib 包
+            if 'lib' not in rpm_name:
+                libs_pkgs_set.add(f'{rpm_name}-libs')
+            else:
+                libs_pkgs_set.add(f'{rpm_name}')
+    return dev_pkgs_set, libs_pkgs_set, dbginfo_pkgs_set
+
+
+def try_install_packages(dev_pkgs, libs_pkgs=set()):
+    not_installed_pkgs = set()
+
+    dev_pkgs = set(dev_pkgs) | set(libs_pkgs)
+    for pkg in dev_pkgs:
+        cmd = f'rpm -q {pkg}'
+        returncode, stdout, stderr = run_cmd(cmd)
+        if returncode != 0:
+            print(f"It seems that the OS doesn't install {pkg}")
+            not_installed_pkgs.add(pkg)
+        else:
+            print(f'The packages "{pkg}" have been installed')
+
+    install_failed_pkgs = set()
+    for pkg in not_installed_pkgs:
+        cmd = f'yum install -y {pkg}'
+        print(f'Trying to install package {pkg} with yum')
+        returncode, stdout, stderr = run_cmd(cmd)
+        if returncode != 0:
+            print(f"Can't install {pkg}, with yum")
+            install_failed_pkgs.add(pkg)
+        else:
+            print(f'Successfully installed {pkg} with yum')
+
+    if install_failed_pkgs:
+        exit_status(
+            "Error", f'Please install {install_failed_pkgs}, then retry')
+
+
+def gen_xml_and_dump(basename, target_path, dev_pkgs_set, libs_files_set):
+    headers_list = list()
+    for pkg in dev_pkgs_set:
+        cmd = f'rpm -ql {pkg} | grep .*include.*\.h$'
+        returncode, stdout, stderr = run_cmd(cmd)
+        headers_list.append(stdout.decode())
+
+    file = f'{target_path}/OLD-dump.xml'
+    with open(file, 'wt+') as f:
+        f.write("<version>\n")
+        f.write('1.0\n')
+        f.write('</version>\n')
+
+        f.write("<headers>\n")
+        f.writelines(headers_list)
+        f.write("</headers>\n")
+
+        f.write("<libs>\n")
+        for line in libs_files_set:
+            f.write(line+'\n')
+        f.write("</libs>\n")
+    dump_file = f'{target_path}/OLD-abi.dump'
+    cmd = f'abi-compliance-checker -xml -l {basename} -dump {file} -dump-path {dump_file}'
+    print(f'Analyzing the symbols ...')
+    returncode, stdout, stderr = run_cmd(cmd)
+
+    return dump_file
+
+
+def gen_dump_with_debuginfo(basename, export_dir, debuginfo_pkgs):
+    # TODO:当前实现有困难
+    pass
+
+
 def main():
 
-    binfile = parse_args()
+    global ARGS
+    ARGS = parse_args()
 
-    os_id = _distro.id()
-    bin_name = binfile.split('/')[-1]
+    # 检查参数
+    if not ARGS.bin:
+        exit_status('Error', 'bin file are not specified (-bin option)')
 
-    prefix_path = f'./{os_id}_{bin_name}_info'
-    if not os.path.exists(f"{prefix_path}"):
-        os.makedirs(f"{prefix_path}")
+    binfile = ARGS.bin
+    if not os.path.isfile(binfile):
+        exit_status('Error', f'''file "{binfile}" does not exist.''')
+    if not os.access(binfile, os.R_OK):
+        exit_status('Error', f'''file "{binfile}" can't be read.''')
 
-    # 收集 os-release 到 prefix_path 目录下
-    collect_os_info(prefix_path)
+    textchars = bytearray({7, 8, 9, 10, 12, 13, 27} |
+                          set(range(0x20, 0x100)) - {0x7f})
 
-    # 收集 elf 信息到 prefix_path 目录下
-    f_elf_info = collect_readelf_info(binfile, prefix_path)
+    def is_binary_string(bytes): return bool(bytes.translate(None, textchars))
 
-    # 收集 ldd 信息到 prefix_path 目录下
-    f_ldd_info = collect_ldd_info(binfile, prefix_path)
+    if not is_binary_string(open(binfile, 'rb').read(1024)):
+        exit_status(
+            'Error', f'''file {binfile} isn't a standard binary file.''')
+
+    if ARGS.export_dir:
+        export_dir = ARGS.export_dir
+    else:
+        export_dir = "abi-info-export"
+    basename = os.path.basename(binfile)
+    export_dir += "/" + basename
+    if not os.path.exists(export_dir):
+        os.makedirs(export_dir)
+
+    # 收集 basename 到 export_dir 目录下
+    collect_name_info(basename, export_dir)
+
+    # 检查 abi-compliance-checker 是否安装
+    global ABI_CC, ABI_DUMPER
+    if not check_cmd(ABI_CC):
+        exit_status('Error', 'ABI Compliance Checker is not installed')
+
+    # 检查 abi-dumper 是否安装
+    if not check_cmd(ABI_DUMPER):
+        exit_status('Error', 'ABI Dumper is not installed')
+
+    # 收集 os-release 到 export_dir 目录下
+    collect_os_info(export_dir)
+
+    # 收集 elf 信息到 export_dir 目录下
+    f_elf = collect_readelf_info(binfile, export_dir)
+
+    # 收集 ldd 信息到 export_dir 目录下
+    f_ldd = collect_ldd_info(binfile, export_dir)
 
     # 通过 elf 信息和 ldd 信息查找 /lib64/libxxx.so.xx 集合
-    soname_file_set = find_soname_file(f_elf=f_elf_info, f_ldd=f_ldd_info)
+    soname_file_set = find_soname_file(f_elf, f_ldd, export_dir)
+    if ARGS.debug:
+        print(f"The dynamic libraries used by the bin are {soname_file_set}")
 
-    # 通过 /lib64/libxxx.so.xx 集合, 分析软件包名信息到 prefix_path 目录下
-    find_soname_package(soname_file_set, binfile, prefix_path)
+    # 通过 /lib64/libxxx.so.xx 集合, 分析软件包名信息到 export_dir 目录下
+    find_soname_package(soname_file_set, export_dir)
 
-    # 输出 tarball 到 prefix_path 目录下
-    compress_outfile(binfile, prefix_path)
+    # 解析  dev 包 和 lib 包
+    dev_pkgs, libs_pkgs, debuginfo_pkgs = find_devel_lib_package(export_dir)
+
+    if not ARGS.debuginfo:
+
+        # 判断系统中是否安装 dev 包 和 lib 包
+        try_install_packages(dev_pkgs, libs_pkgs)
+        # 生成 abi-compliance-checker 用到的 xml 文件，并生成 dump 文件
+        gen_xml_and_dump(
+            basename, export_dir, dev_pkgs, soname_file_set)
+    else:
+        # 判断系统中是否安装 debuginfo_pkgs 包
+        try_install_packages(debuginfo_pkgs)
+        # 通过 debuginfo 信息生成 dump 文件
+        gen_dump_with_debuginfo(basename, export_dir,
+                                debuginfo_pkgs)
+
+    # 输出 tarball 到 export_dir 目录下
+    compress_outfile(binfile, export_dir)
 
 
 if __name__ == "__main__":
