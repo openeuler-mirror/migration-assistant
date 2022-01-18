@@ -8,7 +8,8 @@ URL:            https://github.com/deepinlinux
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  python3
-Requires:       perl
+Requires:       perl-Data-Dumper
+Requires:       perl-Getopt-Long
 Requires:       gcc
 Requires:       gcc-c++
 Requires:       python3-distro
@@ -21,6 +22,10 @@ a tool for checking backward binary compatibility of a C/C++ software library.
 Summary:        collect abi info
 Requires:       python3
 Requires:       elfutils
+Requires:       perl-Data-Dumper
+Requires:       perl-Getopt-Long
+Requires:       gcc
+Requires:       gcc-c++
 
 %description -n abi-info-collect
 a tool for collecting backward binary compatibility of a C/C++ software library.
