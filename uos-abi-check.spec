@@ -3,7 +3,7 @@ Name:           uos-abi-check
 Version:        1.0
 Release:        2
 Summary:        a tool for checking backward binary compatibility of a C/C++ software library
-License:        GPL2
+License:        LGPLv2.1
 URL:            https://github.com/deepinlinux
 Source0:        %{name}-%{version}.tar.gz
 
