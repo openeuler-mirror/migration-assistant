@@ -2,7 +2,6 @@
 
 # -*- coding: utf-8 -*-
 
-import argparse
 import logging
 import os
 import re
@@ -13,6 +12,7 @@ import tarfile
 import distro
 
 from utils import *
+from toolopts import *
 
 TOOL_VERSION = "1.0"
 ABI_CC = "abi-compliance-checker"
@@ -27,24 +27,6 @@ def detect_os():
     if distro.id != 'uos':
         logging.error('please run in UOS')
         exit()
-
-def parse_args():
-    desc = "Analyze abi infomation about bin file."
-    parser = argparse.ArgumentParser(
-        description=desc, epilog=f"example: {CMD_NAME} -tar /path/OLD-abi-info.tar.gz")
-    parser.add_argument('-v', action='version',
-                        version='Package ABI Info Collector '+TOOL_VERSION)
-    parser.add_argument(
-        '-debug', help='enable debug messages', action='store_true')
-    parser.add_argument('-tar', metavar='OLD-abi-info.tar.gz',
-                        help='abi info tarball file',)
-    parser.add_argument(
-        '-debuginfo', help=argparse.SUPPRESS, action='store_true')
-    parser.add_argument(
-        '-export-dir', help='specify a directory to save and reuse ABI info export (default: ./abi-info-export)', metavar='DIR')
-    #parser.add_argument('-src', help='collect source abi info', action='store_true')
-    return parser.parse_args()
-
 
 def extract_tarball(tarball, export_dir):
     print(f'Decompressing file {tarball} ...')
