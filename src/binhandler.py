@@ -94,3 +94,60 @@ class ABI:
         output_file = os.path.join(self.output_dir, self.LDD_FILE)
         utils.store_content_to_file(output_file, output)
 
+    def gen_soname_file(self):
+        self.logger.info("Checking package dependencies ...")
+        # list like  [ "EVP_DigestUpdate@OPENSSL_1_1_0" ]
+        func_dynsym_list = list()
+        # list like [ "EVP_DigestUpdate" ]
+        func_dynsym_name_list = list()
+        # list lke [ "OPENSSL_1_1_0" ]
+        func_dynsym_ver_list = list()
+        elf_file = os.path.join(self.output_dir, self.READELF_FILE)
+        elf_text = utils.get_file_content(elf_file, as_list=True)
+        elf_symbol_fmt = (
+            " *(?P<num>[0-9]*): (?P<value>[0-9abcdef]*) (?P<size>[0-9]*).*(FUNC).*@.*"
+        )
+
+        for line in elf_text:
+            m = re.match(elf_symbol_fmt, line)
+            if not m:
+                continue
+            elf_line_list = re.split(r"\s+", line)
+            if elf_line_list[7] not in func_dynsym_list:
+                func_dynsym_list.append(elf_line_list[7])
+
+            sym = elf_line_list[7].split("@")
+            if sym[0] not in func_dynsym_name_list:
+                func_dynsym_name_list.append(sym[0])
+
+            if sym[1] not in func_dynsym_ver_list:
+                func_dynsym_ver_list.append(sym[1])
+
+        output_file = os.path.join(self.output_dir, self.FUNC_DYNSYM_FILE)
+        self.logger.info(f"Writing file {output_file} ...")
+        utils.store_content_to_file(output_file, func_dynsym_list)
+
+        output_file = os.path.join(self.output_dir, self.FUNC_DYNSYM_NAME_FILE)
+        self.logger.info(f"Writing file {output_file} ...")
+        utils.store_content_to_file(output_file, func_dynsym_name_list)
+
+        output_file = os.path.join(self.output_dir, self.FUNC_DYNSYM_VER_FILE)
+        self.logger.info(f"Writing file {output_file} ...")
+        utils.store_content_to_file(output_file, func_dynsym_ver_list)
+
+        ldd_file = os.path.join(self.output_dir, self.LDD_FILE)
+        ldd_text = utils.get_file_content(ldd_file, as_list=True)
+
+        soname_file_list = list()
+        for line in ldd_text:
+            if not re.match(".*=>.*", line):
+                continue
+            soname = line.strip().split(" ")[0]
+            if soname not in soname_file_list:
+                soname_file_list.append(soname)
+        self.required_sonames = soname_file_list
+        self.logger.debug(
+            f"The list of dynamic libraries that the {self.binfile}"
+            f" binary requires is {self.required_sonames}."
+        )
+
