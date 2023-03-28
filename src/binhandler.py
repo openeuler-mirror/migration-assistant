@@ -78,3 +78,19 @@ class ABI:
         self.so_dep_rpm_dict = dict()
         self.NOTFOUND = "Not Found"
 
+    def gen_elf_info(self):
+        self.logger.info(f"Checking ELF information of file {self.binfile} ...")
+        output, _ = utils.run_subprocess(
+            f"{READELF} -s {self.binfile}", print_output=False
+        )
+
+        output_file = os.path.join(self.output_dir, self.READELF_FILE)
+        utils.store_content_to_file(output_file, output)
+
+    def gen_ldd_info(self):
+        self.logger.info(f"Checking ldd information of file {self.binfile} ...")
+        output, _ = utils.run_subprocess(f"{LDD} {self.binfile}", print_output=False)
+
+        output_file = os.path.join(self.output_dir, self.LDD_FILE)
+        utils.store_content_to_file(output_file, output)
+
