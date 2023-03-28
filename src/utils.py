@@ -13,199 +13,359 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
+import datetime
+import errno
+import getpass
+import inspect
 import logging
 import os
-import re
+import shlex
 import stat
 import subprocess
 import sys
+import traceback
 
-import xml.etree.ElementTree as ET
-import pandas as pd
+import dnf
+import pexpect
+from six import moves
 
-def run_cmd(cmd):
+
+def check_cmd(prog):
+    loggerinst = logging.getLogger(__name__)
+    """Return prog of absolute if prog is in $PATH ."""
+    for path in os.environ['PATH'].split(os.pathsep):
+        path = path.strip('"')
+        candidate = os.path.join(path, prog)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    loggerinst.critical(f"{prog} executable command not found.")
+
+
+def isbinary(filepath):
+    """Return true if filepath is a standard binary file"""
+    loggerinst = logging.getLogger(__name__)
+    if not os.path.exists(filepath):
+        loggerinst.info('file path {} doesnot exits'.format(filepath))
+        return False
+    # 文件可能被损坏，捕捉异常
+    try:
+        FileStates = os.stat(filepath)
+        FileMode = FileStates[stat.ST_MODE]
+        if not stat.S_ISREG(FileMode) or stat.S_ISLNK(
+                FileMode):  # 如果文件既不是普通文件也不是链接文件
+            return False
+        with open(filepath, 'rb') as f:
+            header = (bytearray(f.read(4))[1:4]).decode(encoding="utf-8")
+            if header in ["ELF"]:
+                # print (header)
+                return True
+    except UnicodeDecodeError as e:
+        pass
+    return False
+
+
+def dnf_list(config, arch):
+    """List the package name from the config"""
+    loggerinst = logging.getLogger(__name__)
+    base = dnf.Base()
+
+    if os.path.exists(config):
+        conf = base.conf
+        conf.read(config)
+    else:
+        loggerinst.critical(f"No such file {config}, please check.")
+
+    base.read_all_repos()
+    try:
+        base.fill_sack()
+    except (dnf.exceptions.RepoError, dnf.exceptions.ConfigError) as e:
+        loggerinst.critical(e)
+    query = base.sack.query()
+    a = query.available()
+    pkgs = a.filter(arch=arch)
+    pkgs_list = list()
+    for pkg in pkgs:
+        pkgs_list.append(pkg.name)
+    if pkgs_list:
+        return pkgs_list
+    return []
+
+
+def dnf_provides(config, substr, arch):
+    loggerinst = logging.getLogger(__name__)
+    loggerinst.debug(f"Querying which package provides {substr}.")
+    base = dnf.Base()
+
+    if os.path.exists(config):
+        conf = base.conf
+        conf.read(config)
+    else:
+        loggerinst.critical(f"No such file {config}, please check.")
+
+    base.read_all_repos()
+    try:
+        base.fill_sack()
+    except (dnf.exceptions.RepoError, dnf.exceptions.ConfigError) as e:
+        loggerinst.critical(e)
+    query = base.sack.query()
+    a = query.available()
+    pkgs = a.filter(file__glob=substr, arch=arch,)
+    pkgs_list=list()
+    if pkgs:
+        for pkg in pkgs:
+            pkgs_list.append(pkg.name)
+        loggerinst.debug(
+            f"{substr} is provides by {pkgs_list}")
+    else:
+        pkgs_list=[]
+        loggerinst.debug(
+            f"Not found package provide {substr}")
+    return pkgs_list
+
+
+class Color(object):
+    PURPLE = '\033[95m'
+    CYAN = '\033[96m'
+    DARKCYAN = '\033[36m'
+    BLUE = '\033[94m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+
+
+# Absolute path of a directory holding data for this tool
+DATA_DIR = "/usr/share/abicheck"
+# Directory for temporary data to be stored during runtime
+TMP_DIR = "/var/lib/abicheck"
+
+
+def format_msg_with_datetime(msg, level):
+    """Return a string with msg formatted according to the level"""
+    temp_date = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return f"[{temp_date}] {level.upper()} - {msg}"
+
+
+def get_executable_name():
+    """Get name of the executable file passed to the python interpreter."""
+    return os.path.basename(inspect.stack()[-1][1])
+
+
+def require_root():
+    if os.geteuid() != 0:
+        print("The tool needs to be run under the root user.")
+        print("\nNo changes were made to the system.")
+        sys.exit(1)
+
+
+def get_file_content(filename, as_list=False):
+    """Return content of a file either as a list of lines or as a multiline
+    string.
+    """
+    lines = []
+    if not os.path.exists(filename):
+        if not as_list:
+            return ""
+        return lines
+    file_to_read = open(filename, "r")
+    try:
+        lines = file_to_read.readlines()
+    finally:
+        file_to_read.close()
+    if as_list:
+        # remove newline character from each line
+        return [x.strip() for x in lines]
+
+    return "".join(lines)
+
+
+def store_content_to_file(filename, content):
+    """Write the content into the file.
+
+    Accept string or list of strings (in that case every string will be written
+    on separate line). In case the ending blankline is missing, the newline
+    character is automatically appended to the file.
+    """
+    if isinstance(content, list):
+        content = "\n".join(content)
+    if len(content) > 0 and content[-1] != "\n":
+        # append the missing newline to comply with standard about text files
+        content += "\n"
+    file_to_write = open(filename, "w")
+    try:
+        file_to_write.write(content)
+    finally:
+        file_to_write.close()
+
+
+def run_cmd(cmd, print_cmd=True):
     '''
     run command in subprocess and return exit code, output, error.
     '''
+    loggerinst = logging.getLogger(__name__)
+    if print_cmd:
+        loggerinst.debug("Calling command '%s'" % cmd)
+    loggerinst.file("Calling command '%s'" % cmd)
+
     os.putenv('LANG', 'C')
     os.putenv('LC_ALL', 'C')
     os.environ['LANG'] = 'C'
     os.environ['LC_ALL'] = 'C'
     cmd = cmd.encode('UTF-8')
-    proc = subprocess.Popen(cmd, shell=True,
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE,
-                            )
+    proc = subprocess.Popen(
+        cmd,
+        shell=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
     (stdout, stderr) = proc.communicate()
     returncode = proc.returncode
     return (returncode, stdout, stderr)
 
-def find_devel_lib_package(export_dir):
-    print('Checking the dependency ...')
-    file = f'{export_dir}/OLD-pkgs.info'
-    if not os.access(f'{file}', os.R_OK):
-        exit_status(
-            "Error", f"The info file {file} can't be read. Please check")
 
-    dev_pkgs_set = set()
-    libs_pkgs_set = set()
-    dbginfo_pkgs_set = set()
-    with open(file, 'r') as f:
-        for line in f:
-            rpm_name = get_rpmname_without_libs(line)
-            dev_pkgs_set.add(f'{rpm_name}-devel')
-            dbginfo_pkgs_set.add(f'{rpm_name}-debuginfo')
-            # 包名中包含 lib 关键字的包，本身就是 lib 包
-            if 'lib' not in rpm_name:
-                libs_pkgs_set.add(f'{rpm_name}-libs')
-            else:
-                libs_pkgs_set.add(f'{rpm_name}')
-    return dev_pkgs_set, libs_pkgs_set, dbginfo_pkgs_set
+def run_subprocess(cmd="", print_cmd=True, print_output=True):
+    """Call the passed command and optionally log the called command (print_cmd=True) and its
+    output (print_output=True). Switching off printing the command can be useful in case it contains
+    a password in plain text.
+    """
+    loggerinst = logging.getLogger(__name__)
+    if print_cmd:
+        loggerinst.debug("Calling command '%s'" % cmd)
+    loggerinst.file("Calling command '%s'" % cmd)
 
-def try_install_packages(dev_pkgs, libs_pkgs=set()):
-    not_installed_pkgs = set()
+    # Python 2.6 has a bug in shlex that interprets certain characters in a string as
+    # a NULL character. This is a workaround that encodes the string to avoid the issue.
+    if sys.version_info[0] == 2 and sys.version_info[1] == 6:
+        cmd = cmd.encode("ascii")
+    cmd = shlex.split(cmd, False)
+    process = subprocess.Popen(cmd,
+                               stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT,
+                               bufsize=1,
+                               env={'LC_ALL': 'C'})
+    output = ''
+    for line in iter(process.stdout.readline, b''):
+        output += line.decode()
+        if print_output:
+            loggerinst.info(line.decode().rstrip('\n'))
 
-    dev_pkgs = set(dev_pkgs) | set(libs_pkgs)
-    for pkg in dev_pkgs:
-        cmd = f'rpm -q {pkg}'
-        returncode, stdout, stderr = run_cmd(cmd)
-        if returncode != 0:
-            print(f"It seems that the OS doesn't install {pkg}")
-            not_installed_pkgs.add(pkg)
+    # Call communicate() to wait for the process to terminate so that we can get the return code by poll().
+    # It's just for py2.6, py2.7+/3 doesn't need this.
+    process.communicate()
+
+    return_code = process.poll()
+    return output, return_code
+
+
+def run_cmd_in_pty(cmd="", print_cmd=True, print_output=True, columns=120):
+    """Similar to run_subprocess(), but the command is executed in a pseudo-terminal.
+
+    The pseudo-terminal can be useful when a command prints out a different output with or without an active terminal
+    session. E.g. yumdownloader does not print the name of the downloaded rpm if not executed from a terminal.
+    Switching off printing the command can be useful in case it contains a password in plain text.
+
+    :param cmd: The command to execute, including the options, e.g. "ls -al"
+    :type cmd: string
+    :param print_cmd: Log the command (to both logfile and stdout)
+    :type print_cmd: bool
+    :param print_output: Log the combined stdout and stderr of the executed command (to both logfile and stdout)
+    :type print_output: bool
+    :param columns: Number of columns of the pseudo-terminal (characters on a line). This may influence the output.
+    :type columns: int
+    :return: The output (combined stdout and stderr) and the return code of the executed command
+    :rtype: tuple
+    """
+    loggerinst = logging.getLogger(__name__)
+
+    process = pexpect.spawn(cmd, env={'LC_ALL': 'C'}, timeout=None)
+    if print_cmd:
+        # This debug print somehow needs to be called after(!) the pexpect.spawn(), otherwise the setwinsize()
+        # wouldn't have any effect. Weird.
+        loggerinst.debug("Calling command '%s'" % cmd)
+
+    process.setwinsize(0, columns)
+    process.expect(pexpect.EOF)
+    output = process.before.decode()
+    if print_output:
+        loggerinst.info(output.rstrip('\n'))
+
+    process.close(
+    )  # Per the pexpect API, this is necessary in order to get the return code
+    return_code = process.exitstatus
+
+    return output, return_code
+
+
+def let_user_choose_item(num_of_options, item_to_choose):
+    """Ask user to enter a number corresponding to the item they choose."""
+    loggerinst = logging.getLogger(__name__)
+    while True:  # Loop until user enters a valid number
+        opt_num = prompt_user("Enter number of the chosen %s: " %
+                              item_to_choose)
+        try:
+            opt_num = int(opt_num)
+        except ValueError:
+            loggerinst.warning("Enter a valid number.")
+        # Ensure the entered number is in the proper range
+        if 0 < opt_num <= num_of_options:
+            break
         else:
-            print(f'The packages "{pkg}" have been installed')
+            loggerinst.warning("The entered number is not in range"
+                               " 1 - %s." % num_of_options)
+    return opt_num - 1  # Get zero-based list index
 
-    install_failed_pkgs = set()
-    for pkg in not_installed_pkgs:
-        cmd = f'yum install -y {pkg}'
-        print(f'Trying to install package {pkg} with yum')
-        returncode, stdout, stderr = run_cmd(cmd)
-        if returncode != 0:
-            print(f"Can't install {pkg}, with yum")
-            install_failed_pkgs.add(pkg)
+
+def mkdir_p(path):
+    """Create all missing directories for the path and raise no exception
+    if the path exists.
+    """
+    try:
+        os.makedirs(path)
+    except OSError as err:
+        if err.errno == errno.EEXIST and os.path.isdir(path):
+            pass
         else:
-            print(f'Successfully installed {pkg} with yum')
-
-    if install_failed_pkgs:
-        exit_status(
-            "Error", f'Please install {install_failed_pkgs}, then retry')
+            raise
 
 
-def gen_xml_and_dump(abi_name, target_path, dev_pkgs_set, libs_pkgs_set):
-    headers_list = list()
-    for pkg in dev_pkgs_set:
-        cmd = f'rpm -ql {pkg} | grep .*include.*\.h$'
-        returncode, stdout, stderr = run_cmd(cmd)
-        headers_list.append(stdout.decode())
-
-    libs_list = list()
-    for pkg in libs_pkgs_set:
-        cmd = f'rpm -ql {pkg} | grep .*lib.*\.so\.*$'
-        returncode, stdout, stderr = run_cmd(cmd)
-        libs_list.append(stdout.decode())
-
-    file = f'{target_path}/NEW-dump.xml'
-    with open(file, 'wt+') as f:
-        f.write("<version>\n")
-        f.write('1.0\n')
-        f.write('</version>\n')
-
-        f.write("<headers>\n")
-        f.writelines(headers_list)
-        f.write("</headers>\n")
-
-        f.write("<libs>\n")
-        f.writelines(libs_list)
-        f.write("</libs>\n")
-    dump_file = f'{target_path}/NEW-abi.dump'
-    cmd = f'abi-compliance-checker -xml -l {abi_name} -dump {file} -dump-path {dump_file}'
-    print(f'Analyzing the symbols of {libs_pkgs_set} ...')
-    run_cmd(cmd)
-
-    return dump_file
-
-def compare_syms(export_dir, dump_file):
-    print('Checking symbol differences ...')
-    elf_sym_set = set()
-    elf_file = f'{export_dir}/OLD-elf.info'
-    with open(f'{elf_file}', 'rt') as f:
-        elf_symbol_fmt = ' *(?P<num>[0-9]*): (?P<value>[0-9abcdef]*) (?P<size>[0-9]*).*(FUNC).*@.*'
-        for line in f:
-            m = re.match(elf_symbol_fmt, line)
-            if not m:
-                continue
-            elf_line_list = re.split(r'\s+', line.strip())
-            sym = elf_line_list[7].split('@')[0]
-
-            elf_sym_set.add(sym)
-
-    library_sym_list = set()
-
-    with open(f'{dump_file}', 'r') as file:
-        context = file.read().replace('& ', '')
-
-    with open(f'{dump_file}', 'w+') as file:
-        file.writelines(context)
-
-    tree = ET.parse(f'{dump_file}')
-    for line in tree.iterfind('symbols/library/symbol'):
-        sym = line.text.split('@@')[0]
-        library_sym_list.add(sym)
-        diff_syms_list = list((elf_sym_set - library_sym_list))
-        old_syms_list = list(elf_sym_set)
-
-    return [diff_syms_list, old_syms_list]
+def prompt_user(question, password=False):
+    loggerinst = logging.getLogger(__name__)
+    color_question = Color.BOLD + question + Color.END
+    if password:
+        response = getpass.getpass(color_question)
+    else:
+        response = moves.input(color_question)
+    loggerinst.info("\n")
+    return response
 
 
-def check_cmd(prog):
-    for path in os.environ['PATH'].split(os.pathsep):
-        path = path.strip('"')
-        candidate = path+"/"+prog
-        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
-            return candidate
-    return None
+def log_traceback(debug):
+    """Log a traceback either to both a file and stdout, or just file, based
+    on the debug parameter.
+    """
+    loggerinst = logging.getLogger(__name__)
+    traceback_str = get_traceback_str()
+    if debug:
+        # Print the traceback to the user when debug option used
+        loggerinst.debug(traceback_str)
+    else:
+        # Print the traceback to the log file in any way
+        loggerinst.file(traceback_str)
 
 
-def get_abi_name(export_dir):
-    file = f'{export_dir}/OLD-name.info'
-    if not os.access(f'{file}', os.R_OK):
-        exit_status(
-            "Error", f"The info file {file} can't be read, Please check")
-    with open(file, 'r') as f:
-        name = f.read()
-    return name
+def get_traceback_str():
+    """Get a traceback of an exception as a string."""
+    exc_type, exc_value, exc_traceback = sys.exc_info()
+    return "".join(
+        traceback.format_exception(exc_type, exc_value, exc_traceback))
 
 
-def check_dump_syms(abi_name, export_dir):
-    new_dump = f'{export_dir}/NEW-abi.dump'
-    old_dump = f'{export_dir}/OLD-abi.dump'
-    syms_list = f'{export_dir}/OLD-func-syms.info'
-    html = f'{export_dir}/export.html'
-    cmd = f'abi-compliance-checker -l {abi_name} -old {old_dump} -new {new_dump} --symbols-list {syms_list} --report-path {html}'
-    print(f'Checking the symbols of {abi_name} ...')
-    run_cmd(cmd)
-    return html
+class DictWListValues(dict):
+    """Python 2.4 replacement for Python 2.5+ collections.defaultdict(list)."""
+    def __getitem__(self, item):
+        if item not in iter(self.keys()):
+            self[item] = []
 
-
-def output_result(syms_list, export_dir):
-    df1 = pd.DataFrame(syms_list[0], columns=[u'当前系统缺少符号'])
-    df2 = pd.DataFrame(syms_list[1], columns=[u'二进制依赖符号'])
-
-    result = pd.concat([df1, df2], axis=1)
-    # 用空替换表格中的 NaN
-    result = result.fillna('')
-
-    html = result.to_html()
-    csv = result.to_csv()
-
-    file = f'{export_dir}/result.html'
-    with open(file, 'wt+') as f:
-        f.writelines(html)
-    html_path = os.path.realpath(file)
-
-    file = f'{export_dir}/result.csv'
-    with open(file, 'wt+') as f:
-        f.writelines(csv)
-
-    print(f'The check result is {html_path}')
-
+        return super(DictWListValues, self).__getitem__(item)
