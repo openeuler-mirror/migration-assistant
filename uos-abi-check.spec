@@ -1,75 +1,92 @@
 %global debug_package %{nil}
-Name:           uos-abi-check
-Version:        1.0
-Release:        2
-Summary:        a tool for checking backward binary compatibility of a C/C++ software library
-License:        LGPLv2.1
+
+Name:           abi-info-check
+Version:        1.2
+Release:        1
+Summary:        A tool for checking backward binary compatibility of a C/C++ software library
+License:        GPL2
 URL:            https://github.com/deepinlinux
 Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  python3
+BuildRequires:  python3-pip
+BuildRequires:  python3-distro
+BuildRequires:  python3-pandas
+BuildRequires:  python3-dnf
+BuildRequires:  python3-pexpect
+BuildRequires:  python3-six
+BuildRequires:  zlib-devel
+
+Requires:  python3
+Requires:  python3-pip
+Requires:  python3-distro
+Requires:  python3-pandas
+Requires:  python3-dnf
+Requires:  python3-pexpect
+Requires:  python3-six
+Requires:  zlib-devel
+
 Requires:       perl-Data-Dumper
 Requires:       perl-Getopt-Long
 Requires:       gcc
 Requires:       gcc-c++
-Requires:       python3-distro
-Requires:       python3-pandas
+Requires:       dnf-plugins-core
+Requires:       elfutils
+Requires:       graphviz
+Requires:       ImageMagick
 
 %description
-a tool for checking backward binary compatibility of a C/C++ software library.
-
-%package -n abi-info-collect
-Summary:        collect abi info
-Requires:       python3
-Requires:       elfutils
-Requires:       perl-Data-Dumper
-Requires:       perl-Getopt-Long
-Requires:       gcc
-Requires:       gcc-c++
-
-%description -n abi-info-collect
-a tool for collecting backward binary compatibility of a C/C++ software library.
-
+A tool for checking backward binary compatibility of a C/C++ software library.
 
 %prep
 %autosetup
 
 %build
-python3 -O -m compileall -b src
+pushd 3rdparty/pyinstaller-4.3
+pushd bootloader
+python3 ./waf all
+popd
+pip3 install -r requirements.txt
+python3 setup.py install --user
+popd
+
+pushd abicheck
+%make_build
+popd
+
+python3 setup.py build_manpage
 
 %install
-mkdir -p %{buildroot}/usr/bin/
-mkdir -p %{buildroot}/usr/libexec
-pushd  abi-compliance-checker-2.4
+pushd abicheck
 %make_install
 popd
 
-pushd abi-dumper-2.1
+mkdir -p %{buildroot}%{_mandir}/man1/
+install man/%{name}.1 %{buildroot}%{_mandir}/man1/
+
+pushd  3rdparty/abi-compliance-checker-2.4
 %make_install
 popd
 
-# collect module install
-install -m 755 src/abi-info-collect.py  %{buildroot}/usr/bin/abi-info-collect
-install -m 755 src/abi-info-collect.pyc  %{buildroot}/usr/libexec/abi-info-collect
-
-# check module install
-mkdir -p %{buildroot}/usr/share/uos-abi-check
-install -m 755 src/abi-info-check.pyc  %{buildroot}/usr/libexec/abi-info-check
-install -m 755 uos-abi-check           %{buildroot}/usr/bin/uos-abi-check
+pushd 3rdparty/abi-dumper-2.1
+%make_install
+popd
 
 %files
-%{_libexecdir}/abi-info-check
-%{_bindir}/uos-abi-check
+%license LICENSE
 %{_bindir}/abi-dumper
 %{_bindir}/abi-compliance-checker
 %{_datadir}/abi-compliance-checker/
 
+%{_bindir}/abi-info-check
+%{_datadir}/abicheck/conf/
+%{_mandir}/man1/abi-info-check.1*
 
 
+%changelog
+* Wed Jul 28 2021 guoqinglan <guoqinglan@uniontech.com> - 1.2-1
+- Add library dependency graph tab
+- Add package dependency graph tab
 
-%files -n abi-info-collect
-%{_libexecdir}/abi-info-collect
-%{_bindir}/abi-info-collect
-%{_bindir}/abi-dumper
-%{_bindir}/abi-compliance-checker
-%{_datadir}/abi-compliance-checker/
+* Tue Jun 29 2021 guoqinglan <guoqinglan@uniontech.com> - 1.1-2
+- Fix the problem that glibc cannot be analyzed correctly

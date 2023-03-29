@@ -1,31 +1,24 @@
 prefix ?= /usr
 modules =  abicheck
-cmd = abi-info-check-online
+cmd = abi-info-check
 
 modules_dir = $(DESTDIR)$(prefix)/share/$(modules)
 bin_dir = $(DESTDIR)$(prefix)/bin
-man1_dir = $(DESTDIR)$(prefix)/share/man/man1
 
-.PHONY: install uninstall
+.PHONY: install uninstall build
+
+build:
+	$(HOME)/.local/bin/pyinstaller -F -n $(cmd) main.py
 
 install:
 	mkdir -p $(modules_dir)
 	cp -r conf  $(modules_dir)/
-
-	python3  ./$(cmd).py -v
-	mkdir -p $(man1_dir)
-	mkdir -p $(man1_dir)
-	install -m 644 ${cmd}.1 $(man1_dir)/
-
-	$(HOME)/.local/bin/pyinstaller -F $(cmd).py
-	install -m 755 dist/$(cmd) $(bin_dir)/
+	mkdir -p $(bin_dir)
+	install -m 755 dist/$(cmd) $(bin_dir)/$(cmd)
 
 uninstall:
 	rm -f $(bin_dir)/$(cmd)
-	rm -f $(man1_dir)/$(cmd).1*
 	rm -rf $(modules_dir)
 
 clean:
 	rm -rf build/ dist/ __pycache__/
-build:
-	$(HOME)/.local/bin/pyinstaller -F $(cmd).py
