@@ -20,7 +20,7 @@ CONVERT = "convert"
 class ABI:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.export_dir = tool_opts.export_dir
+        self.output_dir = tool_opts.output_dir
 
         self.binfile = os.path.abspath(tool_opts.binfile)
         self.basename = os.path.basename(self.binfile)
@@ -83,14 +83,14 @@ class ABI:
             f"{READELF} -s {self.binfile}", print_output=False
         )
 
-        output_file = os.path.join(self.export_dir, self.READELF_FILE)
+        output_file = os.path.join(self.output_dir, self.READELF_FILE)
         utils.store_content_to_file(output_file, output)
 
     def gen_ldd_info(self):
         self.logger.info(f"Checking ldd information of file {self.binfile} ...")
         output, _ = utils.run_subprocess(f"{LDD} {self.binfile}", print_output=False)
 
-        output_file = os.path.join(self.export_dir, self.LDD_FILE)
+        output_file = os.path.join(self.output_dir, self.LDD_FILE)
         utils.store_content_to_file(output_file, output)
 
     def gen_soname_file(self):
@@ -101,7 +101,7 @@ class ABI:
         func_dynsym_name_list = list()
         # list lke [ "OPENSSL_1_1_0" ]
         func_dynsym_ver_list = list()
-        elf_file = os.path.join(self.export_dir, self.READELF_FILE)
+        elf_file = os.path.join(self.output_dir, self.READELF_FILE)
         elf_text = utils.get_file_content(elf_file, as_list=True)
         elf_symbol_fmt = (
             " *(?P<num>[0-9]*): (?P<value>[0-9abcdef]*) (?P<size>[0-9]*).*(FUNC).*@.*"
@@ -122,19 +122,19 @@ class ABI:
             if sym[1] not in func_dynsym_ver_list:
                 func_dynsym_ver_list.append(sym[1])
 
-        output_file = os.path.join(self.export_dir, self.FUNC_DYNSYM_FILE)
+        output_file = os.path.join(self.output_dir, self.FUNC_DYNSYM_FILE)
         self.logger.info(f"Writing file {output_file} ...")
         utils.store_content_to_file(output_file, func_dynsym_list)
 
-        output_file = os.path.join(self.export_dir, self.FUNC_DYNSYM_NAME_FILE)
+        output_file = os.path.join(self.output_dir, self.FUNC_DYNSYM_NAME_FILE)
         self.logger.info(f"Writing file {output_file} ...")
         utils.store_content_to_file(output_file, func_dynsym_name_list)
 
-        output_file = os.path.join(self.export_dir, self.FUNC_DYNSYM_VER_FILE)
+        output_file = os.path.join(self.output_dir, self.FUNC_DYNSYM_VER_FILE)
         self.logger.info(f"Writing file {output_file} ...")
         utils.store_content_to_file(output_file, func_dynsym_ver_list)
 
-        ldd_file = os.path.join(self.export_dir, self.LDD_FILE)
+        ldd_file = os.path.join(self.output_dir, self.LDD_FILE)
         ldd_text = utils.get_file_content(ldd_file, as_list=True)
 
         soname_file_list = list()
@@ -414,7 +414,7 @@ class ABI:
             f.write("</libs>\n")
 
     def gen_old_xml(self):
-        file = os.path.join(self.export_dir, self.OLD_XML_FILE)
+        file = os.path.join(self.output_dir, self.OLD_XML_FILE)
         os_version = self.old_os_full_name
         dev_pkgs = self.old_required_rpm_devel_pkgs
         libs_pkgs = self.old_required_rpm_pkgs
@@ -434,7 +434,7 @@ class ABI:
         )
 
     def gen_new_xml(self):
-        file = os.path.join(self.export_dir, self.NEW_XML_FILE)
+        file = os.path.join(self.output_dir, self.NEW_XML_FILE)
         os_version = self.new_os_full_name
         dev_pkgs = self.new_required_rpm_devel_pkgs
         libs_pkgs = self.new_required_rpm_pkgs + self.new_required_rpm_libs_pkgs
@@ -469,9 +469,9 @@ class ABI:
 
         name = self.basename
         num = self.old_os_full_name
-        xml_file = os.path.join(self.export_dir, self.OLD_XML_FILE)
-        dump_file = os.path.join(self.export_dir, self.OLD_DUMP_FILE)
-        log_file = os.path.join(self.export_dir, self.OLD_ABICC_LOG)
+        xml_file = os.path.join(self.output_dir, self.OLD_XML_FILE)
+        dump_file = os.path.join(self.output_dir, self.OLD_DUMP_FILE)
+        log_file = os.path.join(self.output_dir, self.OLD_ABICC_LOG)
 
         self._gen_dump(name, num, xml_file, dump_file, log_file)
 
@@ -479,20 +479,20 @@ class ABI:
 
         name = self.basename
         num = self.new_os_full_name
-        xml_file = os.path.join(self.export_dir, self.NEW_XML_FILE)
-        dump_file = os.path.join(self.export_dir, self.NEW_DUMP_FILE)
-        log_file = os.path.join(self.export_dir, self.NEW_ABICC_LOG)
+        xml_file = os.path.join(self.output_dir, self.NEW_XML_FILE)
+        dump_file = os.path.join(self.output_dir, self.NEW_DUMP_FILE)
+        log_file = os.path.join(self.output_dir, self.NEW_ABICC_LOG)
 
         self._gen_dump(name, num, xml_file, dump_file, log_file)
 
     def diff_dump(self):
         name = self.basename
-        new_dump = os.path.join(self.export_dir, self.NEW_DUMP_FILE)
+        new_dump = os.path.join(self.output_dir, self.NEW_DUMP_FILE)
 
-        old_dump = os.path.join(self.export_dir, self.OLD_DUMP_FILE)
-        log_file = os.path.join(self.export_dir, self.DIFF_ABICC_LOG)
-        sym_list = os.path.join(self.export_dir, self.FUNC_DYNSYM_NAME_FILE)
-        html = os.path.join(self.export_dir, self.EXPORT_HTML_FILE)
+        old_dump = os.path.join(self.output_dir, self.OLD_DUMP_FILE)
+        log_file = os.path.join(self.output_dir, self.DIFF_ABICC_LOG)
+        sym_list = os.path.join(self.output_dir, self.FUNC_DYNSYM_NAME_FILE)
+        html = os.path.join(self.output_dir, self.EXPORT_HTML_FILE)
 
         self.logger.info(f"Comparing dump file {old_dump} and {new_dump} ...")
         cmd = f"{ABI_CC} -l {name}"
@@ -507,8 +507,8 @@ class ABI:
 
     def gen_soname_deppng(self):
 
-        png_file = os.path.join(self.export_dir, self.OLD_SO_PNG_FILE)
-        dot_file = os.path.join(self.export_dir, self.OLD_SO_DOT_FILE)
+        png_file = os.path.join(self.output_dir, self.OLD_SO_PNG_FILE)
+        dot_file = os.path.join(self.output_dir, self.OLD_SO_DOT_FILE)
         file = self.binfile
         self.logger.info(
             f"The so running dependency graph for {file} is being generated..."
@@ -550,8 +550,8 @@ class ABI:
 
     def gen_rpm_deppng(self):
 
-        png_file = os.path.join(self.export_dir, self.OLD_RPM_PNG_FILE)
-        dot_file = os.path.join(self.export_dir, self.OLD_RPM_DOT_FILE)
+        png_file = os.path.join(self.output_dir, self.OLD_RPM_PNG_FILE)
+        dot_file = os.path.join(self.output_dir, self.OLD_RPM_DOT_FILE)
         file = self.binfile
         self.logger.info(
             f"The rpm running dependency graph for {file} is being generated..."
@@ -606,7 +606,7 @@ class ABI:
 
     def add_deptab(self):
 
-        html_file = os.path.join(self.export_dir, self.EXPORT_HTML_FILE)
+        html_file = os.path.join(self.output_dir, self.EXPORT_HTML_FILE)
         self.logger.info(f"Generating html file {html_file}")
 
         substr = r"\n<a id='LibGraphID' href='#LibGraphTab' style='margin-left:3px' class='tab disabled'>"
@@ -635,7 +635,7 @@ class ABI:
         self.logger.info(f"Complete generation.")
 
     def show_html(self):
-        html_file = os.path.join(self.export_dir, self.EXPORT_HTML_FILE)
+        html_file = os.path.join(self.output_dir, self.EXPORT_HTML_FILE)
         self.logger.info(f"The check result is {os.path.abspath(html_file)}")
 
 
