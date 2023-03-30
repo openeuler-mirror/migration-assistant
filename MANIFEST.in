@@ -1,0 +1,6 @@
+recursive-include abicheck/conf *
+recursive-include 3rdparty *
+
+include man/*
+include LICENSE
+include README.md
