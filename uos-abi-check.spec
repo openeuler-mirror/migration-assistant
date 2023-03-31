@@ -2,7 +2,7 @@
 
 Name:           abi-info-check
 Version:        1.2
-Release:        1
+Release:        2
 Summary:        A tool for checking backward binary compatibility of a C/C++ software library
 License:        GPL2
 URL:            https://github.com/deepinlinux
@@ -34,6 +34,10 @@ Requires:       dnf-plugins-core
 Requires:       elfutils
 Requires:       graphviz
 Requires:       ImageMagick
+
+
+Obsoletes: 	abi-info-collect <= %{version}
+Provides: 	abi-info-collect = %{version}
 
 %description
 A tool for checking backward binary compatibility of a C/C++ software library.
@@ -84,9 +88,10 @@ popd
 
 
 %changelog
-* Wed Jul 28 2021 guoqinglan <guoqinglan@uniontech.com> - 1.2-1
+* Wed Jul 28 2021 guoqinglan <guoqinglan@uniontech.com> - 1.2-2
 - Add library dependency graph tab
 - Add package dependency graph tab
+- Obsoletes abi-info-collect package
 
 * Tue Jun 29 2021 guoqinglan <guoqinglan@uniontech.com> - 1.1-2
 - Fix the problem that glibc cannot be analyzed correctly
