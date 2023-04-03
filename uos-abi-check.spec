@@ -30,6 +30,7 @@ Requires:       perl-Data-Dumper
 Requires:       perl-Getopt-Long
 Requires:       gcc
 Requires:       gcc-c++
+Requires:	make
 Requires:       dnf-plugins-core
 Requires:       elfutils
 Requires:       graphviz
