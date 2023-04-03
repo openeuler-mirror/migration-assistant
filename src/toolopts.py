@@ -46,7 +46,7 @@ class ToolOpts(object):
 
         self.debug = False
         self.disable_colors = False
-        self.export_dir = "./abi-info-export"
+        self.output_dir = "./abi-info-export"
         self.binfile = ""
 
         self.old_os_full_name = None
@@ -71,10 +71,10 @@ class CLI(object):
     def _get_argparser():
         usage = (
             "\n"
-            f"  {PROG} [-h]\n"
-            f"  {PROG} [--version]\n"
-            f"  {PROG} [--bin BINFILE] [--os OS_VERSION]"
-            " [--export-dir DIR] [--debug] \n"
+            f"  {PROG} --help\n"
+            f"  {PROG} --version\n"
+            f"  {PROG} --input BINFILE --release OS_RELEASE"
+            " [--output-dir DIR] [--debug] \n"
             "\n\n"
             "WARNING: The pre-migration operating system supported by the tool is"
             f" {SUPPORT_OS}"
@@ -103,24 +103,28 @@ class CLI(object):
         )
 
         self._parser.add_option(
-            "--bin",
+            "-i",
+            "--input",
             metavar="BINFILE",
             help="Input binary file to be migrated.",
         )
         self._parser.add_option(
-            "--os",
-            metavar="OS_VERSION",
+            "-r",
+            "--release"
+            metavar="OS_RELEASE",
             choices=SUPPORT_OS,
             help="Operating systems that support migration."
-            f" supported OS.VERSION is {SUPPORT_OS}",
+            f" supported OS.RELEASE is {SUPPORT_OS}",
         )
         self._parser.add_option(
-            "--export-dir",
+            "-o",
+            "--output-dir",
             metavar="DIR",
             help="Directory to save output file (default: ./abi-info-export)",
         )
 
         self._parser.add_option(
+            "-d",
             "--debug",
             action="store_true",
             help=
@@ -140,14 +144,14 @@ class CLI(object):
 
         global tool_opts  # pylint: disable=C0103
 
-        if parsed_opts.export_dir:
-            tool_opts.export_dir = parsed_opts.export_dir
-        if not os.path.exists(tool_opts.export_dir):
-            mkdir_p(tool_opts.export_dir)
+        if parsed_opts.output_dir:
+            tool_opts.output_dir = parsed_opts.output_dir
+        if not os.path.exists(tool_opts.output_dir):
+            mkdir_p(tool_opts.output_dir)
         from abicheck import logger
-        logger.initialize_logger("abicheck.log", tool_opts.export_dir)
+        logger.initialize_logger("abicheck.log", tool_opts.output_dir)
         loggerinst = logging.getLogger(__name__)
-        loggerinst.info(f"The export-dir is {tool_opts.export_dir}.")
+        loggerinst.info(f"The output-dir is {tool_opts.output_dir}.")
 
         if parsed_opts.debug:
             tool_opts.debug = True
@@ -155,25 +159,25 @@ class CLI(object):
         if parsed_opts.disable_colors:
             tool_opts.disable_colors = True
 
-        if parsed_opts.os:
-            tool_opts.old_os_full_name = parsed_opts.os
+        if parsed_opts.release:
+            tool_opts.old_os_full_name = parsed_opts.release
             tool_opts.old_os_name = tool_opts.old_os_full_name.split('_')[0]
             tool_opts.old_os_version = tool_opts.old_os_full_name.split('_')[1]
             arch = platform.machine()
             tool_opts.old_dnf_conf = f'{utils.DATA_DIR}/conf/{arch}/{tool_opts.old_os_full_name}.conf'
         else:
             loggerinst.critical(
-            "Error: --os is required.")
+            "Error: --release is required.")
 
-        if parsed_opts.bin:
-            tool_opts.binfile = parsed_opts.bin
+        if parsed_opts.input:
+            tool_opts.binfile = parsed_opts.input
             if not utils.isbinary(tool_opts.binfile):
                 loggerinst.critical(
                     f"Error: {tool_opts.binfile} isn't a binary file.")
 
         else:
             loggerinst.critical(
-            "Error: --bin is required.")
+            "Error: --input is required.")
             pass
 
 

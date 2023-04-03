@@ -60,7 +60,7 @@ def initialize_logger(log_name, log_dir="/tmp"):
     # create file handler
     if not os.path.isdir(log_dir):
         os.makedirs(log_dir)  # pragma: no cover
-    handler = logging.FileHandler(os.path.join(log_dir, log_name), "a")
+    handler = logging.FileHandler(os.path.join(log_dir, log_name), "w")
     formatter = CustomFormatter("%(message)s")
     formatter.disable_colors(True)
     handler.setFormatter(formatter)
