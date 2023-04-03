@@ -110,7 +110,7 @@ class CLI(object):
         )
         self._parser.add_option(
             "-r",
-            "--release"
+            "--release",
             metavar="OS_RELEASE",
             choices=SUPPORT_OS,
             help="Operating systems that support migration."
