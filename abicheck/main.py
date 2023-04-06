@@ -15,7 +15,9 @@
 
 import logging
 import sys
+import os
 
+sys.path.append(os.path.dirname(os.getcwd()))
 from abicheck import binhandler, toolopts, utils
 
 loggerinst = logging.getLogger("abicheck")
