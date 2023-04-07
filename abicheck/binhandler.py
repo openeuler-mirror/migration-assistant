@@ -2,6 +2,7 @@ import logging
 import os
 import platform
 import re
+import shutil
 
 import distro
 
@@ -638,6 +639,10 @@ class ABI:
         html_file = os.path.join(self.output_dir, self.EXPORT_HTML_FILE)
         self.logger.info(f"The check result is {os.path.abspath(html_file)}")
 
+    def clean_cache(self):
+        cache_dir = '/tmp/abi-info-check-cache'
+        if os.path.exists(cache_dir):
+            shutil.rmtree(cache_dir)
 
 # get the libs prog depends on and write the results into opened file f
 analyzedlist = []
