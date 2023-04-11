@@ -75,6 +75,7 @@ def main():
 
     # show result
     checker.show_html()
+    checker.clean_cache()
 
 
 if __name__ == "__main__":
