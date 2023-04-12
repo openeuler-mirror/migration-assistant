@@ -1,0 +1,9 @@
+FROM debian:buster
+
+RUN dpkg --add-architecture i386
+RUN apt update && apt upgrade --yes
+RUN apt install --yes gcc-multilib lib32z1-dev python3
+
+WORKDIR /pyinstaller/bootloader
+
+CMD python3 waf all --target-arch=64bit && python3 waf all --target-arch=32bit
