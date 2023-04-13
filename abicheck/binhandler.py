@@ -639,7 +639,8 @@ class ABI:
         html_file = os.path.join(self.output_dir, self.EXPORT_HTML_FILE)
         self.logger.info(f"The check result is {os.path.abspath(html_file)}")
 
-    def clean_cache(self):
+    @staticmethod
+    def clean_cache():
         cache_dir = '/tmp/abi-info-check-cache'
         if os.path.exists(cache_dir):
             shutil.rmtree(cache_dir)

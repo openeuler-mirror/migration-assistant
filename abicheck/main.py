@@ -14,6 +14,7 @@
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import logging
+import signal
 import sys
 import os
 
@@ -75,9 +76,15 @@ def main():
 
     # show result
     checker.show_html()
-    checker.clean_cache()
+
+def sigint_handler(sig, frame):
+    print('You pressed Ctrl+C!')
+    binhandler.ABI.clean_cache()
+    sys.exit(0)
 
 
 if __name__ == "__main__":
 
+    binhandler.ABI.clean_cache()
+    signal.signal(signal.SIGINT, sigint_handler)
     sys.exit(main())
