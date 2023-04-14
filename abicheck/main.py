@@ -77,6 +77,8 @@ def main():
     # show result
     checker.show_html()
 
+    binhandler.ABI.clean_cache()
+
 def sigint_handler(sig, frame):
     print('You pressed Ctrl+C!')
     binhandler.ABI.clean_cache()
