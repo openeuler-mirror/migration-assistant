@@ -15,6 +15,7 @@ BuildRequires:  python3-pandas
 BuildRequires:  python3-dnf
 BuildRequires:  python3-pexpect
 BuildRequires:  python3-six
+BuildRequires:  python3-beautifulsoup4
 BuildRequires:  zlib-devel
 
 Requires:  python3
@@ -24,6 +25,7 @@ Requires:  python3-pandas
 Requires:  python3-dnf
 Requires:  python3-pexpect
 Requires:  python3-six
+Requires:  python3-beautifulsoup4
 Requires:  zlib-devel
 
 Requires:       perl-Data-Dumper
